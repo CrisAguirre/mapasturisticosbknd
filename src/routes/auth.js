@@ -5,54 +5,54 @@ import { requireAuth, signToken } from '../middleware/requireAuth.js';
 
 const router = Router();
 
-// POST /api/auth/register — crea usuario y devuelve token
-router.post('/register', async (req, res) => {
-  try {
-    const { name = '', email = '', password = '', role = 'visitante' } = req.body ?? {};
-    if (!name.trim() || !email.trim() || !password) {
-      return res.status(400).json({ error: 'name, email y password son obligatorios' });
-    }
-    if (password.length < 8) {
-      return res.status(400).json({ error: 'La contraseña debe tener mínimo 8 caracteres' });
-    }
-    const exists = await User.findOne({ email: email.toLowerCase().trim() });
-    if (exists) return res.status(409).json({ error: 'Ese correo ya está registrado' });
+function adminConfig() {
+  return {
+    user: (process.env.ADMIN_USER || '').trim(),
+    hash: (process.env.ADMIN_PASSWORD_HASH || '').trim(),
+  };
+}
 
-    const passwordHash = await bcrypt.hash(password, 10);
-    const user = await User.create({
-      name: name.trim(),
-      email: email.toLowerCase().trim(),
-      passwordHash,
-      role,
-    });
-    const token = signToken(user);
-    return res.status(201).json({
-      token,
-      user: { id: user._id, name: user.name, email: user.email, role: user.role },
-    });
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ error: 'Error al registrar usuario' });
-  }
+// POST /api/auth/register — deshabilitado: la plataforma usa un único
+// usuario administrador configurado por variables de entorno.
+router.post('/register', (req, res) => {
+  return res.status(403).json({ error: 'El registro público está deshabilitado' });
 });
 
-// POST /api/auth/login — valida credenciales y devuelve token
+// POST /api/auth/login — acepta { user | username | email, password }.
+// 1) Usuario único admin por entorno (ADMIN_USER / ADMIN_PASSWORD_HASH).
+// 2) Usuarios de la base de datos (por email).
 router.post('/login', async (req, res) => {
   try {
-    const { email = '', password = '' } = req.body ?? {};
-    if (!email.trim() || !password) {
-      return res.status(400).json({ error: 'email y password son obligatorios' });
+    const { email = '', user = '', username = '', password = '' } = req.body ?? {};
+    const identifier = String(email || user || username || '').trim();
+    if (!identifier || !password) {
+      return res.status(400).json({ error: 'Usuario y contraseña son obligatorios' });
     }
-    const user = await User.findOne({ email: email.toLowerCase().trim() });
-    if (!user) return res.status(401).json({ error: 'Credenciales inválidas' });
 
-    const ok = await bcrypt.compare(password, user.passwordHash);
+    const admin = adminConfig();
+    if (admin.user && identifier.toLowerCase() === admin.user.toLowerCase()) {
+      if (!admin.hash) {
+        return res.status(500).json({ error: 'Admin no configurado en el servidor' });
+      }
+      const ok = await bcrypt.compare(password, admin.hash);
+      if (!ok) return res.status(401).json({ error: 'Credenciales inválidas' });
+      const token = signToken({ _id: 'admin', role: 'admin' });
+      return res.json({
+        token,
+        user: { id: 'admin', name: 'Administración', email: identifier, role: 'admin' },
+      });
+    }
+
+    const dbUser = await User.findOne({ email: identifier.toLowerCase() });
+    if (!dbUser) return res.status(401).json({ error: 'Credenciales inválidas' });
+
+    const ok = await bcrypt.compare(password, dbUser.passwordHash);
     if (!ok) return res.status(401).json({ error: 'Credenciales inválidas' });
 
-    const token = signToken(user);
+    const token = signToken(dbUser);
     return res.json({
       token,
-      user: { id: user._id, name: user.name, email: user.email, role: user.role },
+      user: { id: dbUser._id, name: dbUser.name, email: dbUser.email, role: dbUser.role },
     });
   } catch (err) {
     console.error(err);
@@ -62,6 +62,12 @@ router.post('/login', async (req, res) => {
 
 // GET /api/auth/me — perfil del token (para la página Entrar del front)
 router.get('/me', requireAuth, async (req, res) => {
+  if (req.auth.sub === 'admin') {
+    const admin = adminConfig();
+    return res.json({
+      user: { id: 'admin', name: 'Administración', email: admin.user || 'admin', role: 'admin' },
+    });
+  }
   const user = await User.findById(req.auth.sub).select('_id name email role createdAt');
   if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
   return res.json({ user });

@@ -22,6 +22,8 @@ npm start      # producción
 | `MONGODB_URI` | Cadena de conexión a MongoDB Atlas |
 | `FRONTEND_URL` | URL(s) del front permitidas por CORS, separadas por coma |
 | `JWT_SECRET` | Secreto para firmar tokens de `Entrar` |
+| `ADMIN_USER` | Usuario único administrador (ej. `admin`) |
+| `ADMIN_PASSWORD_HASH` | Hash bcrypt de la clave del admin (generar con bcrypt, costo 10) |
 
 Ejemplo:
 ```env
@@ -29,13 +31,16 @@ PORT=4000
 MONGODB_URI=mongodb+srv://USER:PASS@cluster0.xxxx.mongodb.net/mapasturisticos?appName=Cluster0
 FRONTEND_URL=http://localhost:5173
 JWT_SECRET=un-secreto-largo
+ADMIN_USER=admin
+ADMIN_PASSWORD_HASH=$2b$10$hash-bcrypt-de-la-clave
 ```
+
+> En Render, estas mismas variables deben configurarse en el dashboard
+> (Environment). Sin `ADMIN_USER` / `ADMIN_PASSWORD_HASH` el login no funciona.
 
 ## Endpoints
 
 - `GET /api/health` → `{ ok, db, time }`
-- `POST /api/auth/register` → `{ token, user }`
-- `POST /api/auth/login` → `{ token, user }`
+- `POST /api/auth/register` → `403` (registro público deshabilitado: usuario único)
+- `POST /api/auth/login` (`{ user | username | email, password }`) → `{ token, user }`
 - `GET /api/auth/me` (header `Authorization: Bearer <token>`) → `{ user }`
-
-El front conectará su página **Entrar** a `POST /api/auth/login`.
