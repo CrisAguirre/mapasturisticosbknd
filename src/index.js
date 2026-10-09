@@ -19,9 +19,12 @@ app.use(express.json());
 app.use(
   cors({
     origin(origin, cb) {
-      // Permite peticiones sin origin (curl, health checks) y las del front
+      // Permite peticiones sin origin (curl, health checks) y las del front.
+      // OJO: un origin no listado NO genera 500: simplemente no recibe
+      // cabeceras CORS (el navegador lo bloquea). Nunca llamar cb(Error).
       if (!origin || FRONTEND_URL.includes(origin)) return cb(null, true);
-      return cb(new Error(`CORS bloqueado para origin: ${origin}`));
+      console.warn(`⚠️ CORS sin cabeceras para origin no listado: ${origin}`);
+      return cb(null, false);
     },
   })
 );
@@ -32,6 +35,7 @@ app.get('/api/health', (req, res) => {
     ok: true,
     service: 'mapasturisticosbknd',
     db: states[mongoose.connection.readyState] ?? 'unknown',
+    front: FRONTEND_URL,
     time: new Date().toISOString(),
   });
 });
@@ -40,6 +44,13 @@ app.use('/api/auth', authRouter);
 
 // 404 para rutas API desconocidas
 app.use('/api', (req, res) => res.status(404).json({ error: 'Ruta no encontrada' }));
+
+// Manejador global: siempre JSON, nunca HTML (evita 500 opacos en preflights)
+app.use((err, req, res, next) => {
+  console.error('❌', err.message);
+  if (res.headersSent) return next(err);
+  res.status(err.status || 500).json({ error: err.message || 'Error interno' });
+});
 
 const MONGODB_URI = process.env.MONGODB_URI;
 if (!MONGODB_URI) {
