@@ -8,9 +8,10 @@ import authRouter from './routes/auth.js';
 const PORT = Number(process.env.PORT ?? 4000);
 // FRONTEND_URL puede ser una o varias URLs separadas por coma:
 // "http://localhost:5173,https://tu-front.vercel.app"
+// Se normalizan (sin / final) porque el Origin del navegador nunca lo trae.
 const FRONTEND_URL = (process.env.FRONTEND_URL ?? 'http://localhost:5173')
   .split(',')
-  .map((s) => s.trim())
+  .map((s) => s.trim().replace(/\/+$/, ''))
   .filter(Boolean);
 
 const app = express();
@@ -22,7 +23,8 @@ app.use(
       // Permite peticiones sin origin (curl, health checks) y las del front.
       // OJO: un origin no listado NO genera 500: simplemente no recibe
       // cabeceras CORS (el navegador lo bloquea). Nunca llamar cb(Error).
-      if (!origin || FRONTEND_URL.includes(origin)) return cb(null, true);
+      const clean = (origin || '').replace(/\/+$/, '');
+      if (!origin || FRONTEND_URL.includes(clean)) return cb(null, true);
       console.warn(`⚠️ CORS sin cabeceras para origin no listado: ${origin}`);
       return cb(null, false);
     },
