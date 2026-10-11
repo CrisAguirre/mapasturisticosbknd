@@ -73,4 +73,50 @@ router.get('/me', requireAuth, async (req, res) => {
   return res.json({ user });
 });
 
+// PATCH /api/auth/me — actualizar perfil propio (para la sección Cuenta).
+// Editable: name, cambio de clave (currentPassword + newPassword).
+// Solo lectura: email (identificador de ingreso) y role (lo asigna la admin).
+// La cuenta admin vive en variables de entorno: no se edita aquí.
+router.patch('/me', requireAuth, async (req, res) => {
+  try {
+    if (req.auth.sub === 'admin') {
+      return res.status(403).json({ error: 'La cuenta de administración se configura en el servidor' });
+    }
+    const user = await User.findById(req.auth.sub);
+    if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
+
+    const { name, currentPassword = '', newPassword = '' } = req.body ?? {};
+    let cambió = false;
+
+    if (name !== undefined) {
+      const limpio = String(name).trim();
+      if (limpio.length < 2 || limpio.length > 80) {
+        return res.status(400).json({ error: 'El nombre debe tener entre 2 y 80 caracteres' });
+      }
+      if (limpio !== user.name) {
+        user.name = limpio;
+        cambió = true;
+      }
+    }
+
+    if (newPassword) {
+      if (String(newPassword).length < 6) {
+        return res.status(400).json({ error: 'La nueva contraseña debe tener al menos 6 caracteres' });
+      }
+      const ok = await bcrypt.compare(String(currentPassword), user.passwordHash);
+      if (!ok) return res.status(401).json({ error: 'La contraseña actual no es correcta' });
+      user.passwordHash = await bcrypt.hash(String(newPassword), 10);
+      cambió = true;
+    }
+
+    if (cambió) await user.save();
+    return res.json({
+      user: { id: user._id, name: user.name, email: user.email, role: user.role, createdAt: user.createdAt },
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Error al actualizar el perfil' });
+  }
+});
+
 export default router;
