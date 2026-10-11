@@ -2,6 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import mongoose from 'mongoose';
+import { fileURLToPath } from 'node:url';
 import { connectDB } from './config/db.js';
 import authRouter from './routes/auth.js';
 
@@ -43,6 +44,9 @@ app.get('/api/health', (req, res) => {
 });
 
 app.use('/api/auth', authRouter);
+
+// Fotos de perfil subidas desde la app (ver POST /api/auth/foto)
+app.use('/uploads', express.static(fileURLToPath(new URL('../uploads', import.meta.url))));
 
 // 404 para rutas API desconocidas
 app.use('/api', (req, res) => res.status(404).json({ error: 'Ruta no encontrada' }));

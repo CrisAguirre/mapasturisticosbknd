@@ -1,9 +1,47 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
+import multer from 'multer';
+import path from 'node:path';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { User } from '../models/User.js';
 import { requireAuth, signToken } from '../middleware/requireAuth.js';
 
 const router = Router();
+
+// Subida de foto de perfil: solo imágenes (jpg/png/webp), máx 2 MB.
+// Se guardan en uploads/ (raíz del backend) y se sirven en /uploads (ver index.js).
+const UPLOADS_DIR = fileURLToPath(new URL('../../uploads', import.meta.url));
+fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+const EXT_POR_TIPO = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp' };
+const uploadFoto = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, UPLOADS_DIR),
+    filename: (req, file, cb) => {
+      const ext = EXT_POR_TIPO[file.mimetype] ?? '.jpg';
+      cb(null, `${req.auth.sub}-${Date.now()}${ext}`);
+    },
+  }),
+  limits: { fileSize: 2 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (EXT_POR_TIPO[file.mimetype]) return cb(null, true);
+    return cb(new Error('Solo se permiten fotos JPG, PNG o WebP'));
+  },
+});
+
+function rechazarAdmin(req, res, next) {
+  if (req.auth.sub === 'admin') {
+    return res.status(403).json({ error: 'La cuenta de administración se configura en el servidor' });
+  }
+  return next();
+}
+
+function borrarSubidaLocal(archivo) {
+  // Borra solo archivos dentro de uploads/ (nunca URLs externas)
+  if (archivo && archivo.startsWith('/uploads/')) {
+    fs.unlink(path.join(UPLOADS_DIR, path.basename(archivo)), () => {});
+  }
+}
 
 function adminConfig() {
   return {
@@ -107,6 +145,7 @@ router.patch('/me', requireAuth, async (req, res) => {
       }
       const valor = url || null;
       if (valor !== (user.foto ?? null)) {
+        borrarSubidaLocal(user.foto);
         user.foto = valor;
         cambió = true;
       }
@@ -129,6 +168,29 @@ router.patch('/me', requireAuth, async (req, res) => {
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: 'Error al actualizar el perfil' });
+  }
+});
+
+// POST /api/auth/foto — subir foto de perfil desde el dispositivo.
+// FormData con campo `foto` (JPG/PNG/WebP, máx 2 MB). Responde `{ user }`
+// con `foto` como ruta `/uploads/xxx.jpg` (absolutizar con la URL del API).
+router.post('/foto', requireAuth, rechazarAdmin, uploadFoto.single('foto'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Adjunta una foto (JPG, PNG o WebP, máx 2 MB)' });
+    const user = await User.findById(req.auth.sub);
+    if (!user) {
+      fs.unlink(req.file.path, () => {});
+      return res.status(404).json({ error: 'Usuario no encontrado' });
+    }
+    borrarSubidaLocal(user.foto);
+    user.foto = `/uploads/${req.file.filename}`;
+    await user.save();
+    return res.json({
+      user: { id: user._id, name: user.name, email: user.email, role: user.role, foto: user.foto, createdAt: user.createdAt },
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Error al subir la foto' });
   }
 });
 
