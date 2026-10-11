@@ -174,7 +174,21 @@ router.patch('/me', requireAuth, async (req, res) => {
 // POST /api/auth/foto — subir foto de perfil desde el dispositivo.
 // FormData con campo `foto` (JPG/PNG/WebP, máx 2 MB). Responde `{ user }`
 // con `foto` como ruta `/uploads/xxx.jpg` (absolutizar con la URL del API).
-router.post('/foto', requireAuth, rechazarAdmin, uploadFoto.single('foto'), async (req, res) => {
+// Los errores de subida responden 400 con mensaje claro (no 500).
+router.post(
+  '/foto',
+  requireAuth,
+  rechazarAdmin,
+  (req, res, next) => {
+    uploadFoto.single('foto')(req, res, (err) => {
+      if (err) {
+        const msg = err.code === 'LIMIT_FILE_SIZE' ? 'La foto debe pesar máximo 2 MB' : err.message || 'Error al subir la foto';
+        return res.status(400).json({ error: msg });
+      }
+      return next();
+    });
+  },
+  async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'Adjunta una foto (JPG, PNG o WebP, máx 2 MB)' });
     const user = await User.findById(req.auth.sub);
